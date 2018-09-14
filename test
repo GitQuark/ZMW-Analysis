@@ -1,0 +1,7 @@
+import matplotlib.pyplot as plt
+import numpy as np
+
+imdat1 = np.random.rand([100,100])
+
+fig = plt.figure()
+im1 = plt.imshow(imdat1, cmap = 'Reds')
