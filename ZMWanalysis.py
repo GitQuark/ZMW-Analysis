@@ -6,6 +6,8 @@ Created on Mon Oct 27 11:55:59 2014
 """
 import sys
 import os
+from typing import Tuple
+
 import numpy as np
 from Utility import *
 from zmwanalysiswidget import *
@@ -34,7 +36,7 @@ class GUIForm(QtWidgets.QMainWindow):
         self.filter_dialog = FilterPopup()
         self.analysis_dialog = AnalysisPopup()
 
-        #        self.plotlist = [[],[],[],[],[]]
+        # self.plotlist = [[],[],[],[],[]]
         self.seqplotlist = [[]]
         self.firingplotlist = []
 
@@ -62,10 +64,10 @@ class GUIForm(QtWidgets.QMainWindow):
         ]
         cmap = pg.ColorMap(pos=np.linspace(0.0, 1.0, 6), color=colors)
         self.image_plot.setColorMap(cmap)
-        self.direc = []
-        self.roi_image_plot = self.roip2 = []
-        self.x_filter = self.yfilt = self.zfilt = self.filtertype = []
-        self.xyz_filter = [[], [], []]
+        self.direc = ''
+        # self.roi_image_plot = self.roip2 = []
+        self.filtertype = None
+        self.xyz_filter = ()
         self.blueThresh = None
         self.redThresh = None
         self.bluePeakThresh = None
@@ -74,66 +76,53 @@ class GUIForm(QtWidgets.QMainWindow):
         self.data_file_name = None
         self.background = None
         self.stack = None
+        self.original_stack = None
         self.zpro = None
 
-        self.p1.roi.scaleSnap = self.p1.roi.translateSnap = True
+        self.image_plot.roi.scaleSnap = self.image_plot.roi.translateSnap = True
+        self.image_plot.roi.removeHandle(1)  # Remove the rotation handle
 
     def getfile(self):
 
         if not self.direc:
             self.direc = os.getcwd()
-
-        self.data_file_name = QtWidgets.QFileDialog.getOpenFileName(self, 'Open file', self.direc, "*.h5")[0]
-        self.direc = os.path.dirname(str(self.data_file_name))
+        self.data_file_name, self.direc = QtWidgets.QFileDialog.getOpenFileName(self, 'Open file', self.direc, "*.h5")
+        if self.data_file_name == '':
+            return
         print(self.data_file_name)
-
         self.load(self.data_file_name, self.image_plot)
 
     def load(self, data_file_name, image_plot):
 
-        if self.seqplotlist != [[]]:
-            for x in self.seqplotlist:
-                image_plot.getRoiPlot().removeItem(x)
-                image_plot.getRoiPlot().autoRange()
-
-        if self.firingplotlist:
-            for x in self.firingplotlist:
-                image_plot.getRoiPlot().removeItem(x)
-                image_plot.getRoiPlot().autoRange()
-
-        self.seqplotlist = [[]]
+        roi_plot = image_plot.getRoiPlot()
+        reset_roi_plot(roi_plot, self.seqplotlist, self.firingplotlist)
         self.firingplotlist = []
+        self.seqplotlist = [[]]
 
         stack = h5py.File(data_file_name)
         if 'images' in list(stack.keys()):
             stack = np.array(stack["images"]).astype(float)
-        else:
+        else:  # TODO: handle file that combines all of the images; maybe add them together?
             print('Entry "images" not in loaded h5 file')
             return
 
-        # self.original_stack = self.stack
-        if not self.roi_image_plot:
-            self.original_stack = stack
-        else:
-            # First dimension is fraME NUMBER
-            stack = stack[:, self.roi_image_plot[1]:self.roip2[1], self.roi_image_plot[0]:self.roip2[0]]
+        self.original_stack = self.stack
+        # if not self.roi_image_plot:
+        #     self.original_stack = stack
+        # else:
+        #     # First dimension is frame number
+        #     stack = stack[:, self.roi_image_plot[1]:self.roip2[1], self.roi_image_plot[0]:self.roip2[0]]
 
         # self.stack -= float(self.stack.mean())
         # self.stack /= float(self.stack.std())
         # baseline = np.median(self.stack[self.stack < np.median(self.stack)])
         # self.background = self.stack[np.max(self.stack,(1,2)) < baseline]
-        stack = subtract_background(stack, self.background)
-        stack -= np.mean(stack)
-        stack = stack / stack.std()
-        # self.stack += 100
-        self.zpro = np.std(stack, 0)
-        self.stack = stack
+        self.stack, self.background, self.zpro = process_stack(stack)
         z_project(self.image_plot, self.zpro)
 
-        if self.x_filter:
+        if self.xyz_filter:
             self.stack, self.zpro = filter_stack(self.stack, self.xyz_filter, self.filtertype, self.image_plot)
-            self.analyze(self.blueThresh, self.redThresh,
-                         self.bluePeakThresh, self.redPeakThresh)
+            self.analyze(self.blueThresh, self.redThresh, self.bluePeakThresh, self.redPeakThresh)
 
         return stack
 
@@ -146,34 +135,20 @@ class GUIForm(QtWidgets.QMainWindow):
     def z_project(self):
         z_project(self.image_plot, self.zpro)
 
-    def filter_stack(self):
-        filter_stack(self.stack, self.xyz_filter, self.filtertype, self.image_plot)
+    def filter_stack(self, xyz_filter, filter_type):
+        self.stack, self.zpro = filter_stack(self.stack, xyz_filter, filter_type, self.image_plot)
 
     def clear_settings(self):
         self.roi_image_plot = []
-        self.xyz_filter = [[], [], []]
+        self.xyz_filter = ()
 
     def close_dialog(self):
         self.filter_dialog.destroy()
 
     def crop(self):
-        upper_left = self.image_plot.roi.pos().astype(int)
-        roi_size = np.array(self.image_plot.roi.size()).astype(int)
-        lower_right = upper_left + roi_size
-        x0, y0 = upper_left
-        x1, y1 = lower_right
-        stack = self.original_stack[:, y0:y1, x0:x1]
-        self.image_plot.roi.setPos(0, 0)
-        self.image_plot.roi.setSize((int(roi_size[0]), int(roi_size[1])))
-        stack = subtract_background(stack, self.background)
-        stack -= np.mean(stack)
-        stack = stack / stack.std()
-        #        self.stack += 100
-        self.zpro = np.std(stack, 0)
+        self.stack, self.zpro = crop(self.original_stack, self.image_plot.roi)
         z_project(self.image_plot, self.zpro)
-        self.zpro = np.std(stack, 0)
-        view_stack(stack, self.image_plot)
-        self.stack = stack
+        view_stack(self.stack, self.image_plot)
 
     def show_analysis_dialog(self):
         self.analysis_dialog.show()
@@ -183,16 +158,9 @@ class GUIForm(QtWidgets.QMainWindow):
         self.redThresh = red_thresh
         self.bluePeakThresh = blue_peak_thresh
         self.redPeakThresh = red_peak_thresh
-        if self.seqplotlist != [[]]:
-            for name in self.seqplotlist:
-                self.image_plot.getRoiPlot().removeItem(name)
-                self.image_plot.getRoiPlot().autoRange()
 
-        if self.firingplotlist:
-            for name in self.firingplotlist:
-                self.image_plot.getRoiPlot().removeItem(name)
-                self.image_plot.getRoiPlot().autoRange()
-
+        roi_plot = self.image_plot.getRoiPlot()
+        reset_roi_plot(roi_plot, self.seqplotlist, self.firingplotlist)
         self.seqplotlist = [[]]
         self.firingplotlist = []
 
@@ -203,103 +171,43 @@ class GUIForm(QtWidgets.QMainWindow):
 
         # dntpdirec = r'D:/Vivek/ZMW Data/02.27.2017 - 20kbp SMRT - looks good'
         # fn = 'dntps.h5'
-        file_name, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Open file', os.getcwd(), '*.h5')
-        if file_name == ('', ''):  # Interaction canceled
-            return
-        file = h5py.File(file_name)
-        for idx, name in enumerate(dntp_names):
-            zpro[idx] = np.array(file[name]).astype(float)
-            zpro[idx] -= zpro[idx].mean()
-            zpro[idx] /= zpro[idx].std()
+        # file_name, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Open file', os.getcwd(), '*.h5')
+        # if file_name == ('', ''):  # Interaction canceled
+        #     return
+        # # TODO: No reason to open another file; use data already loaded
+        # file = h5py.File(file_name)
+        # for idx, name in enumerate(dntp_names):
+        #     zpro[idx] = np.array(file[name]).astype(float)
+        #     zpro[idx] -= zpro[idx].mean()
+        #     zpro[idx] /= zpro[idx].std()
 
-        composite = zpro[0] + zpro[1] + zpro[2] + zpro[3]
-        if len(composite.shape) == 2:
-            ly, lx = composite.shape
-        else:  # Should only be 3
-            lz, ly, lx = composite.shape
+        # composite = zpro[0] + zpro[1] + zpro[2] + zpro[3]
+        # if len(composite.shape) == 2:
+        #     ly, lx = composite.shape
+        # else:  # Should only be 3
+        #     lz, ly, lx = composite.shape
 
-        shift_x, shift_y = calculate_xy_shift(lx, ly, composite, zpro)
-        self.zpro = zpro
-        self.czpro = [[], [], [], []]
-        for idx, name in enumerate(dntps):
-            self.czpro[idx] = zpro[idx]
-            self.czpro[idx] = ird.transform_img(self.czpro[idx], tvec=[shift_y, shift_x])
+        # shift_x, shift_y = calculate_xy_shift(lx, ly, composite, zpro)
+        # self.zpro = zpro
+        # self.czpro = [[], [], [], []]
+        # for idx, name in enumerate(dntps):
+        #     self.czpro[idx] = zpro[idx]
+        #     self.czpro[idx] = ird.transform_img(self.czpro[idx], tvec=[shift_y, shift_x])
 
         seqdf = self.peak_detection(blue_thresh, red_thresh, blue_peak_thresh, red_peak_thresh)
-        predictedseq = seqdf.base.str.cat()
+        predicted_seq = seqdf.base.str.cat()
 
         fn = self.data_file_name[:-3] + '_seq.fasta'
-        predictedseq = Seq.Seq(predictedseq, generic_dna)
-        predictedseq = SeqRecord(predictedseq, id=os.path.split(fn)[1])
-        SeqIO.write(predictedseq, fn, "fasta")
+        predicted_seq = Seq.Seq(predicted_seq, generic_dna)
+        predicted_seq = SeqRecord(predicted_seq, id=os.path.split(fn)[1])
+        # TODO save as DATA_FILE_NAME + _analyzed.txt
+        analyzed_name = self.data_file_name[:-3] + '_analyzed.txt'
+        with open(analyzed_name, 'w') as data_file:
+            data_file.write(str(predicted_seq))
+        SeqIO.write(predicted_seq, fn, "fasta")
 
     def check_controls(self):
-        dntp_names = ["dCTP", "dATP", "dGTP", "dTTP"]
-        dntps = [[], [], [], []]
-        zpro = [[], [], [], []]
-        czpro = [[], [], [], []]
-
-        for idx, name in enumerate(dntp_names):
-            fn = [filename for filename in os.listdir(self.direc) if filename.startswith(name)
-                  and filename.endswith('.h5')]
-            hfile = h5py.File(self.direc + os.sep + fn[-1])
-            #            print self.direc + os.sep+ fn[-1]
-            dntps[idx] = np.array(hfile["images"]).astype(float)
-            if self.roi_image_plot:
-                dntps[idx] = dntps[idx][:, self.roi_image_plot[1]:self.roip2[1],
-                             self.roi_image_plot[0]:self.roip2[0]]
-            #            dntps[i] -= self.background
-
-            #            if self.filtertype != []:
-
-            dntps[idx] = dntps[idx][-1500:]
-            #            dntps[i] = (dntps[i]/dntps[i].std((1,2))[0])
-            #            dntps[i] -= dntps[i].mean()
-            #            dntps[i] += self.background.mean()
-            zpro[idx] = np.median(dntps[idx], 0)
-        #            zpro[i] = np.ma.masked_where(zpro[i] < 0, zpro[i])
-
-        #        zpro[0] -= np.mean(zpro[0])
-        #        zpro[1] -= np.mean(zpro[1])
-        #        zpro[2] -= np.mean(zpro[2])
-        #        zpro[3] -= np.mean(zpro[3])
-
-        fig = plt.figure()
-        plt.subplot(1, 3, 1)
-
-        def create_color_plot(data, color):
-            color_map = plt.cm.get_cmap(color)
-            my_color_map = color_map(np.arange(color_map.N))
-            my_color_map[:, -1] = np.linspace(0, 1, color_map.N)
-            my_color_map = ListedColormap(my_color_map)
-            image = plt.imshow(data, cmap=my_color_map)
-            return image
-
-        im1 = create_color_plot(zpro[0], 'Reds')
-        im2 = create_color_plot(zpro[1], 'Greens')
-        im3 = create_color_plot(zpro[2], 'Blues')
-        im4 = create_color_plot(zpro[3], 'PuRd')
-
-        fig.show()
-
-        plt.subplot(1, 3, 2)
-        plt.imshow(self.zpro)
-
-        composite = zpro[0] + zpro[1] + zpro[2] + zpro[3]
-        ly, lx = composite.shape
-
-        shiftx, shifty = calculate_xy_shift(lx, ly, composite, zpro)
-
-        for idx, name in enumerate(dntps):
-            czpro[idx] = np.median(dntps[idx], 0)
-            czpro[idx] = ird.transform_img(czpro[idx], tvec=[shifty, shiftx])
-            czpro[idx] -= self.background
-            czpro[idx] = czpro[idx] / czpro[idx].std()
-            czpro[idx] -= czpro[idx].mean()
-
-        composite = czpro[0] + czpro[1] + czpro[2] + czpro[3]
-        plt.subplot(1, 3, 3)
-        plt.imshow(composite)
+        check_controls(self.direc, self.roi_image_plot, self.roip2, self.background)
 
     def peak_detection(self, blueThresh, redThresh, bluePeakThresh, redPeakThresh):
         markers = ['C', 'A', 'G', 'T']
@@ -313,10 +221,10 @@ class GUIForm(QtWidgets.QMainWindow):
             'mins': []
         })
         seqdf = pd.DataFrame({'base': [], 'times': []})
-        time1, intensity1 = self.image_plot.roiCurve1.getData()
-        time2, intensity2 = self.image_plot.roiCurve2.getData()
+        time1, intensity1 = self.image_plot.top_curve.getData()
+        time2, intensity2 = self.image_plot.bottom_curve.getData()
         intensities = [intensity1, intensity2]
-        self.firingplotlist = []
+        # self.firingplotlist = []
         peak_series = pd.Series()
         min_series = pd.Series()
         for idx, intensity in enumerate(intensities):
@@ -339,29 +247,34 @@ class GUIForm(QtWidgets.QMainWindow):
             end_points = np.where(end_points > 1)[0]
 
             start_points = firing[start_points]
-            end_points = firing[end_points]
-            df = df.append(pd.DataFrame({
+            end_points = firing[end_points] + 1
+            data_dict = {
                 "ident": [idx] * len(start_points),
-                'stimes': start_points,
-                'etimes': end_points}), ignore_index=True)
+                'stimes': list(start_points),
+                'etimes': list(end_points)
+            }
+            df = df.append(pd.DataFrame(data_dict), ignore_index=True, sort=True)
 
-            for idx, x in enumerate(start_points):
-                sp = start_points[idx]
-                ep = end_points[idx] + 1
-                curve = pg.PlotDataItem(x=np.linspace(sp, ep, ep - sp),
-                                        y=intensity[sp:ep],
-                                        pen=pg.mkPen(colors[idx], width=2))
+            # Check that length of start and end points is the same
+            for start, end in zip(start_points, end_points):
+                # sp = start_points[idx]
+                # ep = end_points[idx] + 1
+                # end += 1
+                x_values = np.arange(start, end)
+                intensities = intensity[start: end]
+                curve_pen = pg.mkPen(colors[idx], width=2)
+                curve = pg.PlotDataItem(x=x_values, y=intensities, pen=curve_pen)
                 self.firingplotlist.append(curve)
 
                 self.image_plot.getRoiPlot().addItem(curve)
 
                 try:
-                    peaks, mins = peakdet(v=intensity[sp:ep], delta=noise, x=np.arange(sp, ep))
+                    peaks, mins = peakdet(v=intensities, delta=noise, x=x_values)
                     if len(peaks) == 0 or len(mins) == 0:
                         peaks = np.NAN
-                        substack = np.mean(self.stack[sp:ep], 0)
+                        substack = np.mean(self.stack[start: end], 0)
                         call = get_call(substack, self.czpro, idx)
-                        seqdf = seqdf.append(pd.DataFrame({'base': [call], 'times': [sp]}), ignore_index=True)
+                        seqdf = seqdf.append(pd.DataFrame({'base': [call], 'times': [start]}), ignore_index=True)
                     else:
                         # point = pg.PlotDataItem(peaks, pen = None, symbol = 'o', symbolBrush = 'g')
                         # self.p1.getRoiPlot().addItem(point)
@@ -371,11 +284,11 @@ class GUIForm(QtWidgets.QMainWindow):
                         # self.firingplotlist.append(point)
                         for idx, x in enumerate(peaks):
                             if idx == 0:
-                                ssp = sp
+                                ssp = start
                                 sep = int(mins[idx][0])
                             elif idx == len(peaks) - 1:
                                 ssp = int(mins[idx - 1][0])
-                                sep = ep
+                                sep = end
                             else:
                                 ssp = int(mins[idx - 1][0])
                                 sep = int(mins[idx][0])
@@ -414,7 +327,7 @@ class GUIForm(QtWidgets.QMainWindow):
 
 
 class FilterPopup(QtWidgets.QWidget):
-    acceptsignal = QtCore.pyqtSignal(int, int, int, int)
+    acceptsignal = QtCore.pyqtSignal(tuple, int)
 
     def __init__(self):
         QtWidgets.QWidget.__init__(self)
@@ -425,12 +338,13 @@ class FilterPopup(QtWidgets.QWidget):
         self.ui.okButton.clicked.connect(self.accept)
 
     def accept(self):
-        xfilt = int(self.ui.xRangeEntry.text())
-        yfilt = int(self.ui.yRangeEntry.text())
-        zfilt = int(self.ui.zRangeEntry.text())
-        filtertype = self.ui.filterBox.currentIndex()
+        x_filter = int(self.ui.xRangeEntry.text())
+        y_filter = int(self.ui.yRangeEntry.text())
+        z_filter = int(self.ui.zRangeEntry.text())
+        filter_type = self.ui.filterBox.currentIndex()
+        xyz_filter = (x_filter, y_filter, z_filter)
         self.hide()
-        self.acceptsignal.emit(zfilt, xfilt, yfilt, filtertype)
+        self.acceptsignal.emit(xyz_filter, filter_type)
 
     def close(self):
         self.hide()

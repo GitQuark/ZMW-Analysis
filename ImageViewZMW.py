@@ -20,7 +20,7 @@ if USE_PYSIDE:
     from pyqtgraph.imageview.ImageViewTemplate_pyside import *
 else:
     from pyqtgraph.imageview.ImageViewTemplate_pyqt import *
-    
+
 from pyqtgraph.graphicsItems.ImageItem import *
 from pyqtgraph.graphicsItems.ROI import *
 from pyqtgraph.graphicsItems.LinearRegionItem import *
@@ -37,10 +37,11 @@ try:
 except ImportError:
     from numpy import nanmin, nanmax
 
+# NOTE: Only a few differences between this and ImageView
 
 class PlotROI(ROI):
     def __init__(self, size):
-        ROI.__init__(self, pos=[0,0], size=size) #, scaleSnap=True, translateSnap=True)
+        ROI.__init__(self, pos=[0, 0], size=size)  # , scaleSnap=True, translateSnap=True)
         self.addScaleHandle([1, 1], [0, 0])
         self.addRotateHandle([0, 0], [0.5, 0.5])
 
@@ -78,7 +79,7 @@ class ImageViewZMW(QtGui.QWidget):
     """
     sigTimeChanged = QtCore.Signal(object, object)
     sigProcessingChanged = QtCore.Signal(object)
-    
+
     def __init__(self, parent=None, name="ImageView", view=None, imageItem=None, *args):
         """
         By default, this class creates an :class:`ImageItem <pyqtgraph.ImageItem>` to display image data
@@ -118,9 +119,9 @@ class ImageViewZMW(QtGui.QWidget):
         self.ui = Ui_Form()
         self.ui.setupUi(self)
         self.scene = self.ui.graphicsView.scene()
-        
+
         self.ignoreTimeLine = False
-        
+
         if view is None:
             self.view = ViewBox()
         else:
@@ -128,18 +129,18 @@ class ImageViewZMW(QtGui.QWidget):
         self.ui.graphicsView.setCentralItem(self.view)
         self.view.setAspectLocked(True)
         self.view.invertY()
-        
+
         if imageItem is None:
             self.imageItem = ImageItem()
         else:
             self.imageItem = imageItem
         self.view.addItem(self.imageItem)
         self.currentIndex = 0
-        
+
         self.ui.histogram.setImageItem(self.imageItem)
-        
+
         self.menu = None
-        
+
         self.ui.normGroup.hide()
 
         self.roi = PlotROI(10)
@@ -151,25 +152,25 @@ class ImageViewZMW(QtGui.QWidget):
         self.normRoi.setZValue(20)
         self.view.addItem(self.normRoi)
         self.normRoi.hide()
-        self.roiCurve1 = self.ui.roiPlot.plot()
-        self.roiCurve2 = self.ui.roiPlot.plot()
+        self.top_curve = self.ui.roiPlot.plot()  # Added
+        self.bottom_curve = self.ui.roiPlot.plot()
         self.timeLine = InfiniteLine(0, movable=True)
         self.timeLine.setPen((255, 255, 0, 200))
         self.timeLine.setZValue(1)
         self.ui.roiPlot.addItem(self.timeLine)
-        self.ui.splitter.setSizes([self.height()-35, 35])
+        self.ui.splitter.setSizes([self.height() - 35, 35])
         self.ui.roiPlot.hideAxis('left')
-        
+
         self.keysPressed = {}
         self.playTimer = QtCore.QTimer()
         self.playRate = 0
         self.lastPlayTime = 0
-        
+
         self.normRgn = LinearRegionItem()
         self.normRgn.setZValue(0)
         self.ui.roiPlot.addItem(self.normRgn)
         self.normRgn.hide()
-            
+
         ## wrap functions from view box
         for fn in ['addItem', 'removeItem']:
             setattr(self, fn, getattr(self.view, fn))
@@ -181,7 +182,7 @@ class ImageViewZMW(QtGui.QWidget):
         self.timeLine.sigPositionChanged.connect(self.timeLineChanged)
         self.ui.roiBtn.clicked.connect(self.roiClicked)
         self.roi.sigRegionChanged.connect(self.roiChanged)
-        #self.ui.normBtn.toggled.connect(self.normToggled)
+        # self.ui.normBtn.toggled.connect(self.normToggled)
         self.ui.menuBtn.clicked.connect(self.menuClicked)
         self.ui.normDivideRadio.clicked.connect(self.normRadioChanged)
         self.ui.normSubtractRadio.clicked.connect(self.normRadioChanged)
@@ -190,18 +191,20 @@ class ImageViewZMW(QtGui.QWidget):
         self.ui.normFrameCheck.clicked.connect(self.updateNorm)
         self.ui.normTimeRangeCheck.clicked.connect(self.updateNorm)
         self.playTimer.timeout.connect(self.timeout)
-        
+
         self.normProxy = SignalProxy(self.normRgn.sigRegionChanged, slot=self.updateNorm)
         self.normRoi.sigRegionChangeFinished.connect(self.updateNorm)
-        
+
         self.ui.roiPlot.registerPlot(self.name + '_ROI')
         self.view.register(self.name)
-        
-        self.noRepeatKeys = [QtCore.Qt.Key_Right, QtCore.Qt.Key_Left, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down, QtCore.Qt.Key_PageUp, QtCore.Qt.Key_PageDown]
-        
-        self.roiClicked() ## initialize roi plot to correct shape / visibility
 
-    def setImage(self, img, autoRange=True, autoLevels=True, levels=None, axes=None, xvals=None, pos=None, scale=None, transform=None, autoHistogramRange=True):
+        self.noRepeatKeys = [QtCore.Qt.Key_Right, QtCore.Qt.Key_Left, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down,
+                             QtCore.Qt.Key_PageUp, QtCore.Qt.Key_PageDown]
+
+        self.roiClicked()  ## initialize roi plot to correct shape / visibility
+
+    def setImage(self, img, autoRange=True, autoLevels=True, levels=None, axes=None, xvals=None, pos=None, scale=None,
+                 transform=None, autoHistogramRange=True):
         """
         Set the image to be displayed in the widget.
         
@@ -240,25 +243,25 @@ class ImageViewZMW(QtGui.QWidget):
         
         """
         profiler = debug.Profiler()
-        
+
         if hasattr(img, 'implements') and img.implements('MetaArray'):
             img = img.asarray()
-        
+
         if not isinstance(img, np.ndarray):
             required = ['dtype', 'max', 'min', 'ndim', 'shape', 'size']
             if not all([hasattr(img, attr) for attr in required]):
                 raise TypeError("Image must be NumPy array or any object "
                                 "that provides compatible attributes/methods:\n"
                                 "  %s" % str(required))
-        
+
         self.image = img
         self.imageDisp = None
-        
+
         profiler()
-        
+
         if axes is None:
-            x,y = (0, 1) if self.imageItem.axisOrder == 'col-major' else (1, 0)
-            
+            x, y = (0, 1) if self.imageItem.axisOrder == 'col-major' else (1, 0)
+
             if img.ndim == 2:
                 self.axes = {'t': None, 'x': x, 'y': y, 'c': None}
             elif img.ndim == 3:
@@ -266,10 +269,10 @@ class ImageViewZMW(QtGui.QWidget):
                 if img.shape[2] <= 4:
                     self.axes = {'t': None, 'x': x, 'y': y, 'c': 2}
                 else:
-                    self.axes = {'t': 0, 'x': x+1, 'y': y+1, 'c': None}
+                    self.axes = {'t': 0, 'x': x + 1, 'y': y + 1, 'c': None}
             elif img.ndim == 4:
                 # Even more ambiguous; just assume the default
-                self.axes = {'t': 0, 'x': x+1, 'y': y+1, 'c': 3}
+                self.axes = {'t': 0, 'x': x + 1, 'y': y + 1, 'c': 3}
             else:
                 raise Exception("Can not interpret image with dimensions %s" % (str(img.shape)))
         elif isinstance(axes, dict):
@@ -279,8 +282,10 @@ class ImageViewZMW(QtGui.QWidget):
             for i in range(len(axes)):
                 self.axes[axes[i]] = i
         else:
-            raise Exception("Can not interpret axis specification %s. Must be like {'t': 2, 'x': 0, 'y': 1} or ('t', 'x', 'y', 'c')" % (str(axes)))
-            
+            raise Exception(
+                "Can not interpret axis specification %s. Must be like {'t': 2, 'x': 0, 'y': 1} or ('t', 'x', 'y', 'c')" % (
+                    str(axes)))
+
         for x in ['t', 'x', 'y', 'c']:
             self.axes[x] = self.axes.get(x, None)
         axes = self.axes
@@ -304,17 +309,17 @@ class ImageViewZMW(QtGui.QWidget):
             self.autoLevels()
         if levels is not None:  ## this does nothing since getProcessedImage sets these values again.
             self.setLevels(*levels)
-            
+
         if self.ui.roiBtn.isChecked():
             self.roiChanged()
 
         profiler()
 
         if self.axes['t'] is not None:
-            #self.ui.roiPlot.show()
+            # self.ui.roiPlot.show()
             self.ui.roiPlot.setXRange(self.tVals.min(), self.tVals.max())
             self.timeLine.setValue(0)
-            #self.ui.roiPlot.setMouseEnabled(False, False)
+            # self.ui.roiPlot.setMouseEnabled(False, False)
             if len(self.tVals) > 1:
                 start = self.tVals.min()
                 stop = self.tVals.max() + abs(self.tVals[-1] - self.tVals[0]) * 0.02
@@ -326,8 +331,8 @@ class ImageViewZMW(QtGui.QWidget):
                 stop = 1
             for s in [self.timeLine, self.normRgn]:
                 s.setBounds([start, stop])
-        #else:
-            #self.ui.roiPlot.hide()
+        # else:
+        # self.ui.roiPlot.hide()
         profiler()
 
         self.imageItem.resetTransform()
@@ -349,20 +354,20 @@ class ImageViewZMW(QtGui.QWidget):
     def clear(self):
         self.image = None
         self.imageItem.clear()
-        
+
     def play(self, rate):
         """Begin automatically stepping frames forward at the given rate (in fps).
         This can also be accessed by pressing the spacebar."""
-        #print "play:", rate
+        # print "play:", rate
         self.playRate = rate
         if rate == 0:
             self.playTimer.stop()
             return
-            
+
         self.lastPlayTime = ptime.time()
         if not self.playTimer.isActive():
             self.playTimer.start(16)
-            
+
     def autoLevels(self):
         """Set the min/max intensity levels automatically to match the image data."""
         self.setLevels(self.levelMin, self.levelMax)
@@ -375,7 +380,7 @@ class ImageViewZMW(QtGui.QWidget):
         """Auto scale and pan the view around the image such that the image fills the view."""
         image = self.getProcessedImage()
         self.view.autoRange()
-        
+
     def getProcessedImage(self):
         """Returns the image data after it has been processed by any normalization options in use.
         This method also sets the attributes self.levelMin and self.levelMax 
@@ -384,9 +389,9 @@ class ImageViewZMW(QtGui.QWidget):
             image = self.normalize(self.image)
             self.imageDisp = image
             self.levelMin, self.levelMax = list(map(float, self.quickMinMax(self.imageDisp)))
-            
+
         return self.imageDisp
-        
+
     def close(self):
         """Closes the widget nicely, making sure to clear the graphics scene and release memory."""
         self.ui.roiPlot.close()
@@ -396,14 +401,14 @@ class ImageViewZMW(QtGui.QWidget):
         del self.imageDisp
         super(ImageView, self).close()
         self.setParent(None)
-        
+
     def keyPressEvent(self, ev):
-        #print ev.key()
+        # print ev.key()
         if ev.key() == QtCore.Qt.Key_Space:
             if self.playRate == 0:
-                fps = (self.getProcessedImage().shape[0]-1) / (self.tVals[-1] - self.tVals[0])
+                fps = (self.getProcessedImage().shape[0] - 1) / (self.tVals[-1] - self.tVals[0])
                 self.play(fps)
-                #print fps
+                # print fps
             else:
                 self.play(0)
             ev.accept()
@@ -412,7 +417,7 @@ class ImageViewZMW(QtGui.QWidget):
             self.play(0)
             ev.accept()
         elif ev.key() == QtCore.Qt.Key_End:
-            self.setCurrentIndex(self.getProcessedImage().shape[0]-1)
+            self.setCurrentIndex(self.getProcessedImage().shape[0] - 1)
             self.play(0)
             ev.accept()
         elif ev.key() in self.noRepeatKeys:
@@ -438,7 +443,7 @@ class ImageViewZMW(QtGui.QWidget):
             self.evalKeyState()
         else:
             QtGui.QWidget.keyReleaseEvent(self, ev)
-        
+
     def evalKeyState(self):
         if len(self.keysPressed) == 1:
             key = list(self.keysPressed.keys())[0]
@@ -446,7 +451,7 @@ class ImageViewZMW(QtGui.QWidget):
                 self.play(20)
                 self.jumpFrames(1)
                 self.lastPlayTime = ptime.time() + 0.2  ## 2ms wait before start
-                                                        ## This happens *after* jumpFrames, since it might take longer than 2ms
+                ## This happens *after* jumpFrames, since it might take longer than 2ms
             elif key == QtCore.Qt.Key_Left:
                 self.play(-20)
                 self.jumpFrames(-1)
@@ -461,7 +466,7 @@ class ImageViewZMW(QtGui.QWidget):
                 self.play(1000)
         else:
             self.play(0)
-        
+
     def timeout(self):
         now = ptime.time()
         dt = now - self.lastPlayTime
@@ -469,14 +474,14 @@ class ImageViewZMW(QtGui.QWidget):
             return
         n = int(self.playRate * dt)
         if n != 0:
-            self.lastPlayTime += (float(n)/self.playRate)
-            if self.currentIndex+n > self.image.shape[0]:
+            self.lastPlayTime += (float(n) / self.playRate)
+            if self.currentIndex + n > self.image.shape[0]:
                 self.play(0)
             self.jumpFrames(n)
-        
+
     def setCurrentIndex(self, ind):
         """Set the currently displayed frame index."""
-        self.currentIndex = np.clip(ind, 0, self.getProcessedImage().shape[self.axes['t']]-1)
+        self.currentIndex = np.clip(ind, 0, self.getProcessedImage().shape[self.axes['t']] - 1)
         self.updateImage()
         self.ignoreTimeLine = True
         self.timeLine.setValue(self.tVals[self.currentIndex])
@@ -493,18 +498,18 @@ class ImageViewZMW(QtGui.QWidget):
         self.autoLevels()
         self.roiChanged()
         self.sigProcessingChanged.emit(self)
-    
+
     def updateNorm(self):
         if self.ui.normTimeRangeCheck.isChecked():
             self.normRgn.show()
         else:
             self.normRgn.hide()
-        
+
         if self.ui.normROICheck.isChecked():
             self.normRoi.show()
         else:
             self.normRoi.hide()
-        
+
         if not self.ui.normOffRadio.isChecked():
             self.imageDisp = None
             self.updateImage()
@@ -525,20 +530,20 @@ class ImageViewZMW(QtGui.QWidget):
         if self.ui.roiBtn.isChecked():
             showRoiPlot = True
             self.roi.show()
-            #self.ui.roiPlot.show()
+            # self.ui.roiPlot.show()
             self.ui.roiPlot.setMouseEnabled(True, True)
-            self.ui.splitter.setSizes([self.height()*0.6, self.height()*0.4])
-            self.roiCurve1.show()
-            self.roiCurve2.show()
+            self.ui.splitter.setSizes([self.height() * 0.6, self.height() * 0.4])
+            self.top_curve.show()
+            self.bottom_curve.show()
             self.roiChanged()
             self.ui.roiPlot.showAxis('left')
         else:
             self.roi.hide()
             self.ui.roiPlot.setMouseEnabled(False, False)
-            self.roiCurve1.hide()
-            self.roiCurve2.hide()
+            self.top_curve.hide()
+            self.bottom_curve.hide()
             self.ui.roiPlot.hideAxis('left')
-            
+
         if self.hasTimeAxis():
             showRoiPlot = True
             mn = self.tVals.min()
@@ -548,17 +553,17 @@ class ImageViewZMW(QtGui.QWidget):
             self.timeLine.setBounds([mn, mx])
             self.ui.roiPlot.show()
             if not self.ui.roiBtn.isChecked():
-                self.ui.splitter.setSizes([self.height()-35, 35])
+                self.ui.splitter.setSizes([self.height() - 35, 35])
         else:
             self.timeLine.hide()
-            #self.ui.roiPlot.hide()
-            
+            # self.ui.roiPlot.hide()
+
         self.ui.roiPlot.setVisible(showRoiPlot)
 
     def roiChanged(self):
         if self.image is None:
             return
-            
+
         image = self.getProcessedImage()
         if image.ndim == 2:
             axes = (0, 1)
@@ -566,18 +571,17 @@ class ImageViewZMW(QtGui.QWidget):
             axes = (1, 2)
         else:
             return
-        
+
         data, coords = self.roi.getArrayRegion(image.view(np.ndarray), self.imageItem, axes, returnMappedCoords=True)
         if data is not None:
             if image.ndim == 3:
-                z,x,y = data.shape
-                data2 = np.median(data[:,:,:int(y/2)].max(axis = 1),axis = 1)
-                data1 = np.median(data[:,:,int(y/2):].max(axis = 1),axis = 1)
-#                data1 = data[:,:,:int(y/2)].mean(axis = (1,2))
-#                data2 = data[:,:,int(y/2):].mean(axis = (1,2))
-                self.roiCurve1.setData(y=data1, x=self.tVals)
-                self.roiCurve2.setData(y=data2, x=self.tVals)
-
+                z, x, y = data.shape
+                data1 = np.median(data[:, :, int(y / 2):].max(axis=1), axis=1)
+                data2 = np.median(data[:, :, :int(y / 2)].max(axis=1), axis=1)
+                #                data1 = data[:,:,:int(y/2)].mean(axis = (1,2))
+                #                data2 = data[:,:,int(y/2):].mean(axis = (1,2))
+                self.top_curve.setData(y=data1, x=self.tVals, pen='r')
+                self.bottom_curve.setData(y=data2, x=self.tVals, pen='b')
 
     def quickMinMax(self, data):
         """
@@ -599,27 +603,27 @@ class ImageViewZMW(QtGui.QWidget):
         """
         if self.ui.normOffRadio.isChecked():
             return image
-            
+
         div = self.ui.normDivideRadio.isChecked()
         norm = image.view(np.ndarray).copy()
-        #if div:
-            #norm = ones(image.shape)
-        #else:
-            #norm = zeros(image.shape)
+        # if div:
+        # norm = ones(image.shape)
+        # else:
+        # norm = zeros(image.shape)
         if div:
             norm = norm.astype(np.float32)
-            
+
         if self.ui.normTimeRangeCheck.isChecked() and image.ndim == 3:
             (sind, start) = self.timeIndex(self.normRgn.lines[0])
             (eind, end) = self.timeIndex(self.normRgn.lines[1])
-            #print start, end, sind, eind
-            n = image[sind:eind+1].mean(axis=0)
+            # print start, end, sind, eind
+            n = image[sind:eind + 1].mean(axis=0)
             n.shape = (1,) + n.shape
             if div:
                 norm /= n
             else:
                 norm -= n
-                
+
         if self.ui.normFrameCheck.isChecked() and image.ndim == 3:
             n = image.mean(axis=1).mean(axis=1)
             n.shape = n.shape + (1, 1)
@@ -627,20 +631,20 @@ class ImageViewZMW(QtGui.QWidget):
                 norm /= n
             else:
                 norm -= n
-            
+
         if self.ui.normROICheck.isChecked() and image.ndim == 3:
             n = self.normRoi.getArrayRegion(norm, self.imageItem, (1, 2)).mean(axis=1).mean(axis=1)
-            n = n[:,np.newaxis,np.newaxis]
-            #print start, end, sind, eind
+            n = n[:, np.newaxis, np.newaxis]
+            # print start, end, sind, eind
             if div:
                 norm /= n
             else:
                 norm -= n
-                
+
         return norm
-        
+
     def timeLineChanged(self):
-        #(ind, time) = self.timeIndex(self.ui.timeSlider)
+        # (ind, time) = self.timeIndex(self.ui.timeSlider)
         if self.ignoreTimeLine:
             return
         self.play(0)
@@ -648,20 +652,20 @@ class ImageViewZMW(QtGui.QWidget):
         if ind != self.currentIndex:
             self.currentIndex = ind
             self.updateImage()
-        #self.timeLine.setPos(time)
-        #self.emit(QtCore.SIGNAL('timeChanged'), ind, time)
+        # self.timeLine.setPos(time)
+        # self.emit(QtCore.SIGNAL('timeChanged'), ind, time)
         self.sigTimeChanged.emit(ind, time)
 
     def updateImage(self, autoHistogramRange=True):
         ## Redraw image on screen
         if self.image is None:
             return
-            
+
         image = self.getProcessedImage()
-        
+
         if autoHistogramRange:
             self.ui.histogram.setHistogramRange(self.levelMin, self.levelMax)
-        
+
         # Transpose image into order expected by ImageItem
         if self.imageItem.axisOrder == 'col-major':
             axorder = ['t', 'x', 'y', 'c']
@@ -669,47 +673,46 @@ class ImageViewZMW(QtGui.QWidget):
             axorder = ['t', 'y', 'x', 'c']
         axorder = [self.axes[ax] for ax in axorder if self.axes[ax] is not None]
         image = image.transpose(axorder)
-            
+
         # Select time index
         if self.axes['t'] is not None:
             self.ui.roiPlot.show()
             image = image[self.currentIndex]
-            
+
         self.imageItem.updateImage(image)
-            
-            
+
     def timeIndex(self, slider):
         ## Return the time and frame index indicated by a slider
         if self.image is None:
-            return (0,0)
-        
+            return (0, 0)
+
         t = slider.value()
-        
+
         xv = self.tVals
         if xv is None:
             ind = int(t)
         else:
             if len(xv) < 2:
-                return (0,0)
-            totTime = xv[-1] + (xv[-1]-xv[-2])
+                return (0, 0)
+            totTime = xv[-1] + (xv[-1] - xv[-2])
             inds = np.argwhere(xv < t)
             if len(inds) < 1:
-                return (0,t)
-            ind = inds[-1,0]
+                return (0, t)
+            ind = inds[-1, 0]
         return ind, t
 
     def getView(self):
         """Return the ViewBox (or other compatible object) which displays the ImageItem"""
         return self.view
-        
+
     def getImageItem(self):
         """Return the ImageItem for this ImageView."""
         return self.imageItem
-        
+
     def getRoiPlot(self):
         """Return the ROI PlotWidget for this ImageView"""
         return self.ui.roiPlot
-       
+
     def getHistogramWidget(self):
         """Return the HistogramLUTWidget for this ImageView"""
         return self.ui.histogram
@@ -724,20 +727,20 @@ class ImageViewZMW(QtGui.QWidget):
         img = self.getProcessedImage()
         if self.hasTimeAxis():
             base, ext = os.path.splitext(fileName)
-            fmt = "%%s%%0%dd%%s" % int(np.log10(img.shape[0])+1)
+            fmt = "%%s%%0%dd%%s" % int(np.log10(img.shape[0]) + 1)
             for i in range(img.shape[0]):
                 self.imageItem.setImage(img[i], autoLevels=False)
                 self.imageItem.save(fmt % (base, i, ext))
             self.updateImage()
         else:
             self.imageItem.save(fileName)
-            
+
     def exportClicked(self):
         fileName = QtGui.QFileDialog.getSaveFileName()
         if fileName == '':
             return
         self.export(fileName)
-        
+
     def buildMenu(self):
         self.menu = QtGui.QMenu()
         self.normAction = QtGui.QAction("Normalization", self.menu)
@@ -747,7 +750,7 @@ class ImageViewZMW(QtGui.QWidget):
         self.exportAction = QtGui.QAction("Export", self.menu)
         self.exportAction.triggered.connect(self.exportClicked)
         self.menu.addAction(self.exportAction)
-        
+
     def menuClicked(self):
         if self.menu is None:
             self.buildMenu()

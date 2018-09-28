@@ -205,9 +205,9 @@ class GUIForm(QtGui.QMainWindow):
         zpro = [[],[],[],[]]
         n = len(dntps)
         
-        dntpdirec = r'Y:/ZMW_Data/Fatemeh/ZMW program backup/ZMW data for Fatermeh/Fatemeh_dNTPs' 
-        fn = 'dntps.h5'
-        hfile = h5py.File(dntpdirec + fn)
+        dntpdirec = r'C:\Users\Noah PC\PycharmProjects\ZMW analysis\ZMW\02082017'
+        fn = 'dntpss.h5'
+        hfile = h5py.File(os.path.join(dntpdirec, fn))
         for i,x in enumerate(dntpnames):
             fn = 'dntps.h5'
             zpro[i] = np.array(hfile[x]).astype(float)
